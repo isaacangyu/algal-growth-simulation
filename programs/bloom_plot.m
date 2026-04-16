@@ -1,4 +1,4 @@
-function bloom_plot()
+function bloom_plot(factors)
 % BLOOM_PLOT  Simulate and plot a nutrient-phytoplankton Lotka-Volterra model.
 %
 % This reproduces the two figures in the prompt:
@@ -23,18 +23,43 @@ params.d = 0.1;      % proportional phytoplankton death rate
 params.e = 0.0;      % proportional nutrient loss rate
 
 %% ----------------------- growth configuration --------------------------
-% Toggle suites here.
-opts.useTemperature          = true;
-opts.useTemperatureSpecific  = false;
-opts.useTemperatureSeasonal  = false;
+function opts = opts_from_factors(factors)
+    factors = upper(string(factors));
 
-opts.useLight                = false;
-opts.useLightSpecific        = false;
-opts.useLightDepth           = false;
-opts.useLightSeasonal        = false;
+    % ---------- master switches ----------
+    hasT = contains(factors, "T");
+    hasL = contains(factors, "L");
+    hasG = contains(factors, "G");
+    hasS = contains(factors, "S");
+    hasD = contains(factors, "D");
 
-opts.combineAdditively       = false;   % true only when combining light+temp
+    if factors == "BASE"
+        hasT = false;
+        hasL = false;
+        hasG = false;
+        hasS = false;
+        hasD = false;
+    end
 
+    % ---------- main mode flags ----------
+    opts.useTemperature         = hasT;
+    opts.useLight               = hasL;
+
+    % growth-specific flags apply only to enabled drivers
+    opts.useTemperatureSpecific = hasT && hasG;
+    opts.useLightSpecific       = hasL && hasG;
+
+    % seasonality applies only to enabled drivers
+    opts.useTemperatureSeasonal = hasT && hasS;
+    opts.useLightSeasonal       = hasL && hasS;
+
+    % depth only makes sense for light
+    opts.useLightDepth          = hasL && hasD;
+
+    % if both light and temperature are on, default to multiplicative coupling
+    opts.combineAdditively      = false;
+end
+opts = opts_from_factors(factors);
 % Temperature parameters
 opts.temp.muConst = 0.5;    % half-saturating constant temperature growth
 opts.temp.Tmin    = 0.0;
@@ -60,7 +85,7 @@ opts.depth.kP      = 8.0;
 opts.depth.nQuad   = 150;
 
 %% ----------------------- time span / initial data ----------------------
-baseX0 = [0.05, 0.0005];
+baseX0 = [7.5e-2, 7.5e-3]; % 5e-2, 5e-4
 scales = [1, 10, 100, -2];
 X0 = scales(1) .* baseX0;
 
@@ -134,13 +159,17 @@ xlim([0 max(N)]);
 ylim([0 max(P)]);
 title(build_model_label(opts));
 
+%-----------------analysis---------------------
+nPeriod = estimate_period(t, N);
+pPeriod = estimate_period(t, P);
+fprintf('nPeriod %d pPeriod %d\n', nPeriod, pPeriod);
+
 % ---------------- time series ----------------
 subplot(1,2,2); hold on; box on;
-[t, X] = ode45(@(t,x) lv_rhs(t, x, params, opts), 0:tFinal, X0.');
-yline(eq.Nstar / 5, '-b', 'LineWidth', 1.0, 'HandleVisibility', 'off'); % how to get rid
+yline(eq.Nstar / 5, '-b', 'LineWidth', 1.0, 'HandleVisibility', 'off'); 
 yline(eq.Pstar, '-r', 'LineWidth', 1.0, 'HandleVisibility', 'off');
-plot(t, X(:,1) / 5, 'LineWidth', 1.0, 'DisplayName', 'Nutrient (N)');
-plot(t, X(:,2), 'LineWidth', 1.0, 'DisplayName', 'Phytoplankton (P)');
+plot(t, N / 5, 'LineWidth', 1.0, 'DisplayName', 'Nutrient (N)');
+plot(t, P, 'LineWidth', 1.0, 'DisplayName', 'Phytoplankton (P)');
 for yr = 365:365:tFinal
     xline(yr, '-', 'Color', 0.82*[1 1 1], 'HandleVisibility','off');
 end
@@ -152,6 +181,34 @@ legend('Location','northeast');
 title(build_model_label(opts));
 
 hold off;
+end
+
+function T = estimate_period(t, y)
+% Estimate period from successive local maxima.
+% Returns mean spacing between peaks.
+
+    y = y(:);
+    t = t(:);
+
+    peakIdx = [];
+    for i = 2:length(y)-1
+        if y(i) > y(i-1) && y(i) >= y(i+1)
+            peakIdx(end+1) = i; %#ok<AGROW>
+        end
+    end
+
+    % ignore first transient peaks if many exist
+    if numel(peakIdx) >= 4
+        peakIdx = peakIdx(2:end);
+    end
+
+    if numel(peakIdx) < 2
+        T = NaN;
+        return;
+    end
+
+    peakTimes = t(peakIdx);
+    T = mean(diff(peakTimes));
 end
 
 function dx = lv_rhs(t, x, params, opts)
