@@ -1,57 +1,31 @@
 function mu = specific_growth(t, N, P, opts, mode)
-% SPECIFIC_GROWTH  Effective growth multiplier for temperature/light suites.
-%
-% mu = specific_growth(t, N, P, opts)
-% mu = specific_growth(t, N, P, opts, mode)
-%
-% Inputs
-%   t    : time in days
-%   N,P  : state variables (P used in depth-dependent light attenuation)
-%   opts : configuration structure
-%   mode : 'dynamic'  -> evaluate full model at time t (default)
-%          'baseline' -> evaluate seasonality-controlled average reference
-%
-% Supported switches
-%   Temperature: constant / specific-growth / seasonality
-%   Light:       constant / specific-growth / depth / seasonality
-%
-% Conventions requested in the prompt:
-%   - For seasonality, control against the baseline.
-%   - For temperature, the non-seasonal specific-growth baseline is
-%     integral(mu_T)/length over the survivable interval.
-%   - For light depth, the baseline is the average over the epilimnion.
-
 if nargin < 5
     mode = 'dynamic';
 end
 
-% ---------- temperature contribution ----------
 muT = 1.0;
-if isfield(opts, 'useTemperature') && opts.useTemperature
-    if isfield(opts, 'useTemperatureSpecific') && opts.useTemperatureSpecific
-        if strcmpi(mode, 'baseline') || ~opts.useTemperatureSeasonal
-            muT = temp_specific_baseline(opts.temp);
-        else
-            T = opts.temp.Topt + opts.temp.Tamp .* ...
-                sin(2*pi*t/opts.temp.period + opts.temp.phase);
-            muT = temp_specific_curve(T, opts.temp);
-        end
+if opts.flags.hasT
+    if strcmpi(mode, 'baseline') || ~opts.useTemperatureSeasonal
+        muT = temp_specific_baseline(opts.temp);
     else
-        if strcmpi(mode, 'baseline') || ~opts.useTemperatureSeasonal
-            muT = opts.temp.muConst;
-        else
-            % Seasonal control around the same baseline mean.
-            muT = opts.temp.muConst + opts.temp.muConst .* ...
-                sin(2*pi*t/opts.temp.period + opts.temp.phase);
-            muT = max(muT, 0);
-            muT = min(muT, 1);
-        end
+        T = opts.temp.Topt + opts.temp.Tamp .* ...
+            sin(2*pi*t/opts.temp.period + opts.temp.phase); % phase?
+        muT = temp_specific_curve(T, opts.temp);
+    end
+else
+    if strcmpi(mode, 'baseline') || ~opts.useTemperatureSeasonal
+        muT = opts.temp.muConst;
+    else
+        muT = opts.temp.muConst + opts.temp.muConst .* ...
+            sin(2*pi*t/opts.temp.period + opts.temp.phase);
+        % tightening clamp expands initial point choice for stability
+        muT = max(muT, 0);
+        muT = min(muT, 1);
     end
 end
 
-% ---------- light contribution ----------
 muL = 1.0;
-if isfield(opts, 'useLight') && opts.useLight
+if opts.flags.hasL
     if isfield(opts, 'useLightDepth') && opts.useLightDepth
         % Beer-Lambert depth average or Monod(depth-light) average.
         if strcmpi(mode, 'baseline')
@@ -82,16 +56,16 @@ if isfield(opts, 'useLight') && opts.useLight
 end
 
 % ---------- combine terms ----------
-if isfield(opts, 'useTemperature') && opts.useTemperature && ...
-   isfield(opts, 'useLight') && opts.useLight
-    if isfield(opts, 'combineAdditively') && opts.combineAdditively
-        mu = 0.5 * (muT + muL);
-    else
-        mu = muT .* muL;
-    end
-elseif isfield(opts, 'useTemperature') && opts.useTemperature
+% if isfield(opts, 'useTemperature') && opts.flags.hasT && ...
+%    isfield(opts, 'useLight') && opts.flags.hasL
+%     if isfield(opts, 'combineAdditively') && opts.combineAdditively
+%         mu = 0.5 * (muT + muL);
+%     else
+%         mu = muT .* muL;
+%     end
+if opts.flags.hasT
     mu = muT;
-elseif isfield(opts, 'useLight') && opts.useLight
+elseif opts.flags.hasL
     mu = muL;
 else
     mu = 1.0;
