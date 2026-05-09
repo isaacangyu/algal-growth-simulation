@@ -1,3 +1,1 @@
-Plot
-Specific Growth
-Stability Analysis
+# algal-growth-simulation
